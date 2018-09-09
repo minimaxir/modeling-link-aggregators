@@ -1,7 +1,7 @@
 ---
-title: "Analyzing IMDb Data The Intended Way, with R and ggplot2"
+title: "Problems with Predicting Post Performance on Reddit and Other Link Aggregators"
 author: "Max Woolf (@minimaxir)"
-date: "2018-07-15"
+date: "2018-09-10"
 output:
   html_notebook:
     highlight: tango
@@ -18,16 +18,11 @@ This notebook is licensed under the MIT License. If you use the code or data vis
 IMDb data retrieved on July 4th 2018.
 
 
-**Information courtesy of
-IMDb
-(http://www.imdb.com).
-Used with permission.**
-
-
 ```{r}
 library(tidyverse)
 library(scales)
 library(tidytext)
+library(ggridges)
 
 sessionInfo()
 ```
@@ -203,6 +198,8 @@ ggsave('reddit_subreddit_highmedian.png', plot, width=6, height=4)
 ```
 
 ## Hacker News
+
+HN vizzes aren't included in the post, but are here for my own reference.
 
 Similar ETL as above. (but easier since do not need to group by subreddit and labels have already been created)
 
@@ -382,6 +379,76 @@ plot <- ggplot(reddit_bigrams_sub, aes(x=order, y=perc_75, fill=subreddit)) +
 ggsave('reddit_subreddit_topbigrams.png', plot, width=6, height=9)
 ```
 
+# Density Distribution / Ridgeplot
+
+```{r}
+reddit_dist <- read_csv('results-20180908-193851.csv') %>%
+                group_by(subreddit) %>%
+                mutate(prop = num_submissions / sum(num_submissions)) %>%
+                ungroup() %>%
+                filter(score <= 20)
+
+reddit_dist %>% head()
+```
+
+```{r}
+# sub_exclude <- c("The_Donald", "PrequelMemes", "aww", "cats", "CrappyDesign", "politics")
+sub_exclude <- c()
+
+top_subreddits <- df_top_subreddits %>%
+                    filter(!(subreddit %in% sub_exclude)) %>%
+                    head(50) %>%
+                    pull(subreddit)
+
+plot <- ggplot(reddit_dist %>% filter(subreddit %in% top_subreddits), aes(x=score, y=fct_rev(subreddit), height=prop, fill=fct_rev(subreddit))) +
+  geom_density_ridges(stat = 'identity', scale=1.5, size=0.25) +
+  scale_x_continuous(breaks=c(0, 1, seq(10, 20, 10))) +
+  scale_y_discrete() +
+  scale_fill_hue(l = 55, guide=F) +
+  labs(title='Density Distribution of Score of Reddit Submissions\nFor 50 Top Subreddits',
+       subtitle='For Posts Made January 2017 to May 2018.\nTop Subreddits determined by # of unique submitters.',
+       x='Score of Reddit Post',
+       y='Day of Week Reddit Post Was Made',
+       fill='Median Score for Posts\nMade at Time on Subreddit',
+       caption = "Max Woolf — minimaxir.com") +
+  theme(
+    axis.text.y = element_text(size = 5),
+    axis.title.y = element_blank(),
+    panel.grid.minor = element_blank())
+
+ggsave('reddit_dist.png', plot, width=4, height=6)
+```
+
+Another approach: faceted bar chart
+
+```{r}
+# sub_exclude <- c("The_Donald", "PrequelMemes", "aww", "cats", "CrappyDesign", "politics")
+sub_exclude <- c()
+
+top_subreddits <- df_top_subreddits %>%
+                    filter(!(subreddit %in% sub_exclude)) %>%
+                    head(54) %>%
+                    pull(subreddit)
+
+plot <- ggplot(reddit_dist %>% filter(subreddit %in% top_subreddits), aes(x=score, y=prop, fill=subreddit)) +
+  geom_bar(stat = 'identity') +
+  scale_x_continuous(breaks=c(0, 1, 5, 10), limits=c(NA, 11)) +
+  scale_y_continuous(labels=percent_format(accuracy=1), breaks=pretty_breaks(4)) +
+  scale_fill_hue(l = 55, guide=F) +
+  facet_wrap(~ subreddit, ncol=6, scales="free")  +
+  labs(title='Score Distribution of Reddit Submissions For 54 Top Subreddits',
+       subtitle='For Posts Made January 2017 to May 2018. Top Subreddits determined by # of unique submitters.',
+       x='Score of Reddit Post',
+       y='% of All Submissions on Subreddit',
+       fill='Median Score for Posts\nMade at Time on Subreddit',
+       caption = "Max Woolf — minimaxir.com") +
+  theme(
+    axis.text.y = element_text(size = 5),
+    axis.text.x = element_text(size = 6),
+    panel.grid.minor = element_blank())
+
+ggsave('reddit_dist_facet.png', plot, width=6, height=8)
+```
 
 
 # LICENSE
