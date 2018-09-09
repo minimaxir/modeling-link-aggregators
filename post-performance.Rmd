@@ -1,0 +1,397 @@
+---
+title: "Analyzing IMDb Data The Intended Way, with R and ggplot2"
+author: "Max Woolf (@minimaxir)"
+date: "2018-07-15"
+output:
+  html_notebook:
+    highlight: tango
+    mathjax: null
+    number_sections: yes
+    theme: spacelab
+    toc: True
+---
+
+This R Notebook is the complement to my blog post [Analyzing IMDb Data The Intended Way, with R and ggplot2](http://minimaxir.com/2018/07/imdb-data-analysis/).
+
+This notebook is licensed under the MIT License. If you use the code or data visualization designs contained within this notebook, it would be greatly appreciated if proper attribution is given back to this notebook and/or myself. Thanks! :)
+
+IMDb data retrieved on July 4th 2018.
+
+
+**Information courtesy of
+IMDb
+(http://www.imdb.com).
+Used with permission.**
+
+
+```{r}
+library(tidyverse)
+library(scales)
+library(tidytext)
+
+sessionInfo()
+```
+```{r}
+theme_set(theme_minimal(base_size=9, base_family="Source Sans Pro") +
+            theme(plot.title = element_text(size=8, family="Source Sans Pro Bold", margin=margin(t = -0.1, b = 0.1, unit='cm')),
+                  axis.title.x = element_text(size=8),
+                  axis.title.y = element_text(size=8),
+                  plot.subtitle = element_text(family="Source Sans Pro Semibold", color="#969696", size=6),
+                  plot.caption = element_text(size=6, color="#969696"),
+                  legend.title = element_text(size=8),
+                  legend.key.width = unit(0.25, unit='cm')))
+```
+
+
+# Post Distribution By Hour/Day-Of-Week
+
+## Reddit
+
+```{r}
+df_reddit_hour_doy <- read_csv('results-20180819-160214.csv')
+
+df_reddit_hour_doy %>% head()
+```
+
+Mutate the numeric hour/day-of-week into named factors.
+
+* Hours are from `0-23`, 12 AM is 0
+* Days-of-week are from `1-7`, 1 is Sunday
+
+```{r}
+hour_labels <- c(paste(c(12, 1:11), "AM"), paste(c(12, 1:11), "PM"))
+print(hour_labels)
+
+doy_labels <- c("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
+```
+
+
+```{r}
+df_reddit_hour_doy <- df_reddit_hour_doy %>%
+                        mutate(post_hour = factor(post_hour, labels=hour_labels),
+                               post_weekday = factor(post_weekday, labels=doy_labels))
+
+df_reddit_hour_doy %>% mutate()
+```
+
+Additionally, normalize post counts by subreddit.
+
+```{r}
+df_reddit_hour_doy <- df_reddit_hour_doy %>%
+                        group_by(subreddit) %>%
+                        mutate(prop = num_instances / sum(num_instances))
+
+df_reddit_hour_doy %>% select(subreddit, num_instances, prop) %>% head()
+```
+
+Tabulate the Subreddits. If we want to take the Top *n* subreddits excluding certain ones, we can filter down from this list.
+
+```{r}
+df_top_subreddits <- df_reddit_hour_doy %>%
+                      group_by(subreddit) %>%
+                      summarize(total_posts = sum(num_instances)) %>%
+                      arrange(desc(total_posts))
+
+df_top_subreddits %>% head(50)
+```
+
+
+```{r}
+# exclude subreddits which have high medians
+sub_exclude <- c("The_Donald", "PrequelMemes", "aww", "cats", "CrappyDesign", "politics")
+
+top_subreddits <- df_top_subreddits %>%
+                    filter(!(subreddit %in% sub_exclude)) %>%
+                    head(50) %>%
+                    pull(subreddit)
+
+plot <- ggplot(df_reddit_hour_doy %>% filter(subreddit %in% top_subreddits), aes(x=post_hour, y=fct_rev(post_weekday), fill=perc_50)) +
+  geom_raster(stat="identity", interpolate=F) +
+  geom_vline(xintercept=9 - 0.5, color="white", size=0.25, alpha=1) +
+  geom_vline(xintercept=17 - 0.5, color="white", size=0.25, alpha=1) +
+  scale_x_discrete() +
+  scale_y_discrete() +
+  scale_fill_viridis_c(option="plasma") +
+  facet_wrap(~ subreddit, nrow=10, ncol=5)  +
+  labs(title='Median Score of Reddit Submissions For 50 Top Subreddits, by Time Posted',
+       subtitle='For Posts Made January 2017 to May 2018. Vertical lines indicate 9 AM - 5 PM Eastern. Top Subreddits determined by # of unique submitters.',
+       x='Hour Reddit Post Was Made (12 AM — 11 PM Eastern Time)',
+       y='Day of Week Reddit Post Was Made',
+       fill='Median Score for Posts\nMade at Time on Subreddit',
+       caption = "Max Woolf — minimaxir.com") +
+  theme(legend.position = 'top',
+        legend.title = element_text(size = 6),
+        legend.text = element_text(size = 5),
+        legend.key.width = unit(1, unit='cm'),
+        legend.key.height = unit(0.25, unit='cm'),
+        legend.margin = margin(c(0, 0, -0.4, 0), unit='cm'),
+        axis.text.x = element_blank(),
+        axis.text.y = element_text(size = 5))
+
+ggsave('reddit_subreddit_hr_doy.png', plot, width=6, height=8)
+```
+
+```{r}
+# exclude subreddit which have unexplained spikes
+sub_exclude <- c("CircleofTrust", "Music", "business")
+
+top_subreddits <- df_top_subreddits %>%
+                    filter(!(subreddit %in% sub_exclude)) %>%
+                    head(50) %>%
+                    pull(subreddit)
+
+plot <- ggplot(df_reddit_hour_doy %>% filter(subreddit %in% top_subreddits), aes(x=post_hour, y=fct_rev(post_weekday), fill=prop)) +
+  geom_raster(stat="identity", interpolate=F) +
+  geom_vline(xintercept=9 - 0.5, color="white", size=0.25, alpha=1) +
+  geom_vline(xintercept=17 - 0.5, color="white", size=0.25, alpha=1) +
+  scale_x_discrete() +
+  scale_y_discrete() +
+  scale_fill_viridis_c(option="inferno", labels=percent_format(accuracy=0.1)) +
+  facet_wrap(~ subreddit, nrow=10, ncol=5) +
+  labs(title='Heat Map of Day-of-Week and Times of Reddit Submissions For 50 Top Subreddits',
+       subtitle='For Posts Made January 2017 to May 2018. Vertical lines indicate 9 AM — 5 PM Eastern. Top Subreddits determined by # of unique submitters.',
+       x='Hour Reddit Post Was Made (12 AM — 11 PM Eastern Time)',
+       y='Day of Week Reddit Post Was Made',
+       fill='Proportion of All Posts\nMade on Subreddit',
+       caption = "Max Woolf — minimaxir.com") +
+  theme(legend.position = 'top',
+        legend.title = element_text(size = 6),
+        legend.text = element_text(size = 5),
+        legend.key.width = unit(1, unit='cm'),
+        legend.key.height = unit(0.25, unit='cm'),
+        legend.margin = margin(c(0, 0, -0.4, 0), unit='cm'),
+        axis.text.x = element_blank(),
+        axis.text.y = element_text(size = 5))
+
+ggsave('reddit_subreddit_prop.png', plot, width=6, height=8)
+```
+
+Drill down on subreddits with high medians.
+
+```{r}
+sub_exclude <- c("The_Donald", "PrequelMemes", "aww", "cats", "CrappyDesign", "politics")
+
+top_subreddits <- df_top_subreddits %>%
+                    filter(subreddit %in% sub_exclude) %>%
+                    head(50) %>%
+                    pull(subreddit)
+
+plot <- ggplot(df_reddit_hour_doy %>% filter(subreddit %in% top_subreddits), aes(x=post_hour, y=fct_rev(post_weekday), fill=perc_50)) +
+  geom_raster(stat="identity", interpolate=F) +
+  geom_vline(xintercept=9 - 0.5, color="white", size=0.25, alpha=1) +
+  geom_vline(xintercept=17 - 0.5, color="white", size=0.25, alpha=1) +
+  scale_x_discrete() +
+  scale_y_discrete() +
+  scale_fill_viridis_c(option="plasma") +
+  facet_wrap(~ subreddit, nrow=3, ncol=2)  +
+  labs(title='Median Score of Reddit Submissions For 50 Top Subreddits, by Time Posted',
+       subtitle='For Posts Made January 2017 to May 2018. Vertical lines indicate 9 AM - 5 PM Eastern. Top Subreddits determined by # of unique submitters.',
+       x='Hour Reddit Post Was Made (12 AM — 11 PM Eastern Time)',
+       y='Day of Week Reddit Post Was Made',
+       fill='Median Score for Posts\nMade at Time on Subreddit',
+       caption = "Max Woolf — minimaxir.com") +
+  theme(legend.position = 'top',
+        legend.title = element_text(size = 6),
+        legend.text = element_text(size = 5),
+        legend.key.width = unit(1, unit='cm'),
+        legend.key.height = unit(0.25, unit='cm'),
+        legend.margin = margin(c(0, 0, -0.4, 0), unit='cm'),
+        axis.text.x = element_blank(),
+        axis.text.y = element_text(size = 5))
+
+ggsave('reddit_subreddit_highmedian.png', plot, width=6, height=4)
+```
+
+## Hacker News
+
+Similar ETL as above. (but easier since do not need to group by subreddit and labels have already been created)
+
+```{r}
+df_hn_hour_doy <- read_csv('results-20180819-164659.csv') %>%
+                        mutate(post_hour = factor(post_hour, labels=hour_labels),
+                               post_weekday = factor(post_weekday, labels=doy_labels),
+                               prop = num_instances / sum(num_instances))
+
+df_hn_hour_doy %>% head()
+```
+
+```{r}
+plot <- ggplot(df_hn_hour_doy, aes(x=post_hour, y=fct_rev(post_weekday), fill=perc_50)) +
+  geom_raster(stat="identity", interpolate=F) +
+  geom_vline(xintercept=9 - 0.5, color="white", size=0.25, alpha=1) +
+  geom_vline(xintercept=17 - 0.5, color="white", size=0.25, alpha=1) +
+  scale_x_discrete() +
+  scale_y_discrete() +
+  scale_fill_viridis_c(option="plasma") +
+  labs(title='Median Score of Reddit Submissions For 50 Top Subreddits, by Time Posted',
+       subtitle='For Posts Made January 2017 to May 2018. Vertical lines indicate 9 AM - 5 PM Eastern. Top Subreddits determined by # of unique submitters.',
+       x='Hour Reddit Post Was Made (12 AM — 11 PM Eastern Time)',
+       y='Day of Week Reddit Post Was Made',
+       fill='Median Score for Posts\nMade at Time on Subreddit',
+       caption = "Max Woolf — minimaxir.com") +
+  theme(legend.position = 'top',
+        legend.title = element_text(size = 6),
+        legend.text = element_text(size = 5),
+        legend.key.width = unit(1, unit='cm'),
+        legend.key.height = unit(0.25, unit='cm'),
+        legend.margin = margin(c(0, 0, -0.4, 0), unit='cm'),
+        axis.text.x = element_blank(),
+        axis.text.y = element_text(size = 5))
+
+ggsave('hn_hr_doy.png', plot, width=5, height=3)
+```
+
+```{r}
+plot <- ggplot(df_reddit_hour_doy %>% filter(subreddit %in% top_subreddits), aes(x=post_hour, y=fct_rev(post_weekday), fill=prop)) +
+  geom_raster(stat="identity", interpolate=F) +
+  geom_vline(xintercept=9 - 0.5, color="white", size=0.25, alpha=1) +
+  geom_vline(xintercept=17 - 0.5, color="white", size=0.25, alpha=1) +
+  scale_x_discrete() +
+  scale_y_discrete() +
+  scale_fill_viridis_c(option="inferno", labels=percent_format(accuracy=0.1)) +
+  labs(title='Distribution of New Reddit Submissions For 50 Top Subreddits, by Time Posted',
+       subtitle='For Posts Made January 2017 to May 2018. Vertical lines indicate 9 AM - 5 PM Eastern. Top Subreddits determined by # of unique submitters.',
+       x='Hour Reddit Post Was Made (12 AM — 11 PM Eastern Time)',
+       y='Day of Week Reddit Post Was Made',
+       fill='Proportion of All Posts\nMade on Subreddit',
+       caption = "Max Woolf — minimaxir.com") +
+  theme(legend.position = 'top',
+        legend.title = element_text(size = 6),
+        legend.text = element_text(size = 5),
+        legend.key.width = unit(1, unit='cm'),
+        legend.key.height = unit(0.25, unit='cm'),
+        legend.margin = margin(c(0, 0, -0.3, 0), unit='cm'),
+        axis.text.x = element_blank(),
+        axis.text.y = element_text(size = 5))
+
+ggsave('hn_prop.png', plot, width=5, height=3)
+```
+
+# Bigrams
+
+Query:
+
+```sql
+#standardSQL
+SELECT * FROM (
+SELECT *,
+ROW_NUMBER() OVER (PARTITION BY subreddit ORDER BY perc_75 DESC) entry_num
+FROM (
+SELECT word, nextword,
+subreddit,
+COUNT(*) as num_instances,
+ROUND(AVG(score)) as avg_score,
+perc_25, perc_50, perc_75
+
+FROM (
+SELECT *,
+PERCENTILE_CONT(score, 0.25) OVER (PARTITION BY subreddit, word, nextword) as perc_25,
+PERCENTILE_CONT(score, 0.50) OVER (PARTITION BY subreddit, word, nextword) as perc_50,
+PERCENTILE_CONT(score, 0.75) OVER (PARTITION BY subreddit, word, nextword) as perc_75
+FROM (
+  SELECT word,
+  LEAD(word) OVER(PARTITION BY id ORDER BY pos) nextword,
+  score,
+  subreddit
+  FROM (
+    SELECT SPLIT(LOWER(REGEXP_REPLACE(title, r'[^a-zA-Z0-9 \'\"]', '')), " ") as words, id, score, subreddit
+    FROM `fh-bigquery.reddit_posts.*`
+    WHERE _TABLE_SUFFIX BETWEEN "2017_01" AND "2018_05"
+    AND subreddit IN (
+      SELECT subreddit
+      FROM `fh-bigquery.reddit_posts.*`
+      WHERE _TABLE_SUFFIX BETWEEN "2017_01" AND "2018_05"
+      GROUP BY subreddit
+      ORDER BY APPROX_COUNT_DISTINCT(author) DESC
+      LIMIT 100
+    )
+    ), UNNEST(words) word
+    WITH OFFSET as pos
+    )
+  WHERE nextword IS NOT NULL
+  AND nextword != ''
+  AND word IS NOT NULL
+  AND word != ''
+)
+GROUP BY word, nextword, subreddit, perc_25, perc_50, perc_75
+HAVING num_instances >= 100
+)
+)
+WHERE entry_num <= 50
+ORDER BY subreddit, entry_num
+```
+
+## Reddit
+
+```{r}
+reddit_bigrams <- read_csv('results-20180819-173006.csv')
+
+reddit_bigrams %>% head()
+```
+
+Filter out rows where both parts of the bigram are common/stop words.
+
+```{r}
+stopwords <- get_stopwords() %>% pull(word)
+
+reddit_bigrams  <- reddit_bigrams %>%
+                    filter(!((word %in% stopwords) & (nextword %in% stopwords))) %>%
+                    mutate(bigram = paste(word, nextword))
+```
+
+Visualize only the top 5 bigrams for each subreddit (for readability)
+
+This adapts a [ggplot2 facet trick](https://drsimonj.svbtle.com/ordering-categories-within-ggplot2-facets) by Simon Jackson.
+
+```{r}
+sub_exclude <- c("me_irl", "explainlikeimfive", "Fireteams", "NoStupidQuestions", "GlobalOffensive", "GlobalOffensiveTrade", "RocketLeagueExchange", "leagueoflegends", "CircleofTrust", "PUBATTLEGROUNDS")
+
+top_subreddits <- df_top_subreddits %>%
+                    filter(!(subreddit %in% sub_exclude)) %>%
+                    head(24) %>%
+                    pull(subreddit)
+
+reddit_bigrams_sub <- reddit_bigrams %>%
+                        filter(subreddit %in% top_subreddits) %>%
+                        group_by(subreddit) %>%
+                        top_n(10, perc_75) %>%
+                        ungroup() %>%
+                        arrange(subreddit, perc_75) %>%
+                        mutate(order = row_number())
+
+plot <- ggplot(reddit_bigrams_sub, aes(x=order, y=perc_75, fill=subreddit)) +
+  geom_bar(stat="identity") +
+  scale_x_continuous(
+    breaks = reddit_bigrams_sub$order,
+    labels = reddit_bigrams_sub$bigram
+  ) +
+  scale_y_continuous(labels=comma) +
+  scale_fill_hue(l=50, guide=F) +
+  coord_flip()  +
+  facet_wrap(~ subreddit, nrow=6, ncol=4, scales="free")  +
+  labs(title='Title Bigram Importance of Reddit Submissions For 24 Top Subreddits',
+       subtitle='For Posts Made January 2017 to May 2018. Minimum 100 occurences of each bigram. Excludes bigrams where both words are stop words.',
+       x='Bigram',
+       y='75th Score Percentile for Submissions Containing Bigram on Subreddit',
+       fill='Median Score for Posts\nMade at Time on Subreddit',
+       caption = "Max Woolf — minimaxir.com") +
+  theme(axis.text.x = element_text(size = 6),
+        axis.text.y = element_text(size = 6),
+        axis.title.y = element_blank())
+
+ggsave('reddit_subreddit_topbigrams.png', plot, width=6, height=9)
+```
+
+
+
+# LICENSE
+
+The MIT License (MIT)
+
+Copyright (c) 2018 Max Woolf
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
