@@ -21,8 +21,8 @@ IMDb data retrieved on July 4th 2018.
 ```{r}
 library(tidyverse)
 library(scales)
-library(tidytext)
 library(ggridges)
+library(bigrquery)
 
 sessionInfo()
 ```
@@ -37,13 +37,95 @@ theme_set(theme_minimal(base_size=9, base_family="Source Sans Pro") +
                   legend.key.width = unit(0.25, unit='cm')))
 ```
 
+BigQuery Project ID (change to your own)
+
+```{r}
+project_id <- "poetic-analog-126704"
+```
+
 
 # Post Distribution By Hour/Day-Of-Week
 
 ## Reddit
 
+BigQuery:
+
+```sql
+#standardSQL
+SELECT
+subreddit,
+post_hour,
+post_weekday,
+COUNT(*) as num_instances,
+ROUND(AVG(score)) as avg_score,
+perc_25, perc_50, perc_75
+FROM (
+  SELECT *,
+  PERCENTILE_CONT(score, 0.25) OVER (PARTITION BY subreddit, post_hour, post_weekday) as perc_25,
+  PERCENTILE_CONT(score, 0.50) OVER (PARTITION BY subreddit, post_hour, post_weekday) as perc_50,
+  PERCENTILE_CONT(score, 0.75) OVER (PARTITION BY subreddit, post_hour, post_weekday) as perc_75
+  FROM (
+    SELECT 
+    EXTRACT(HOUR FROM TIMESTAMP_SECONDS(created_utc) AT TIME ZONE "America/New_York") as post_hour,
+    EXTRACT(DAYOFWEEK FROM TIMESTAMP_SECONDS(created_utc) AT TIME ZONE "America/New_York") as post_weekday,
+    subreddit,
+    score
+    FROM `fh-bigquery.reddit_posts.*`
+    WHERE _TABLE_SUFFIX BETWEEN "2017_01" AND "2018_05"
+        AND subreddit IN (
+      SELECT subreddit
+      FROM `fh-bigquery.reddit_posts.*`
+      WHERE _TABLE_SUFFIX BETWEEN "2017_01" AND "2018_05"
+      GROUP BY subreddit
+      ORDER BY APPROX_COUNT_DISTINCT(author) DESC
+      LIMIT 100
+    )
+)
+)
+GROUP BY subreddit, post_hour, post_weekday, perc_25, perc_50, perc_75
+ORDER BY subreddit, post_hour, post_weekday
+```
+
 ```{r}
-df_reddit_hour_doy <- read_csv('results-20180819-160214.csv')
+query <- '
+#standardSQL
+SELECT
+subreddit,
+post_hour,
+post_weekday,
+COUNT(*) as num_instances,
+ROUND(AVG(score)) as avg_score,
+perc_25, perc_50, perc_75
+FROM (
+  SELECT *,
+  PERCENTILE_CONT(score, 0.25) OVER (PARTITION BY subreddit, post_hour, post_weekday) as perc_25,
+  PERCENTILE_CONT(score, 0.50) OVER (PARTITION BY subreddit, post_hour, post_weekday) as perc_50,
+  PERCENTILE_CONT(score, 0.75) OVER (PARTITION BY subreddit, post_hour, post_weekday) as perc_75
+  FROM (
+    SELECT 
+    EXTRACT(HOUR FROM TIMESTAMP_SECONDS(created_utc) AT TIME ZONE "America/New_York") as post_hour,
+    EXTRACT(DAYOFWEEK FROM TIMESTAMP_SECONDS(created_utc) AT TIME ZONE "America/New_York") as post_weekday,
+    subreddit,
+    score
+    FROM `fh-bigquery.reddit_posts.*`
+    WHERE _TABLE_SUFFIX BETWEEN "2017_01" AND "2018_05"
+        AND subreddit IN (
+      SELECT subreddit
+      FROM `fh-bigquery.reddit_posts.*`
+      WHERE _TABLE_SUFFIX BETWEEN "2017_01" AND "2018_05"
+      GROUP BY subreddit
+      ORDER BY APPROX_COUNT_DISTINCT(author) DESC
+      LIMIT 100
+    )
+)
+)
+GROUP BY subreddit, post_hour, post_weekday, perc_25, perc_50, perc_75
+ORDER BY subreddit, post_hour, post_weekday
+'
+
+
+df_reddit_hour_doy <- bq_project_query(project_id, query, use_legacy_sql=F) %>%
+                        bq_table_download()
 
 df_reddit_hour_doy %>% head()
 ```
@@ -93,7 +175,7 @@ df_top_subreddits %>% head(50)
 
 ```{r}
 # exclude subreddits which have high medians
-sub_exclude <- c("The_Donald", "PrequelMemes", "aww", "cats", "CrappyDesign", "politics")
+sub_exclude <- c("The_Donald", "PrequelMemes", "aww", "cats", "CrappyDesign", "politics", "CircleofTrust", "gonewild")
 
 top_subreddits <- df_top_subreddits %>%
                     filter(!(subreddit %in% sub_exclude)) %>%
@@ -127,7 +209,7 @@ ggsave('reddit_subreddit_hr_doy.png', plot, width=6, height=8)
 ```
 
 ```{r}
-# exclude subreddit which have unexplained spikes
+# exclude subreddits which have unexplained spikes
 sub_exclude <- c("CircleofTrust", "Music", "business")
 
 top_subreddits <- df_top_subreddits %>%
@@ -203,8 +285,63 @@ HN vizzes aren't included in the post, but are here for my own reference.
 
 Similar ETL as above. (but easier since do not need to group by subreddit and labels have already been created)
 
+BigQuery:
+
+```sql
+#standardSQL
+SELECT
+post_hour,
+post_weekday,
+COUNT(*) as num_instances,
+ROUND(AVG(score)) as avg_score,
+perc_25, perc_50, perc_75
+FROM (
+  SELECT *,
+  PERCENTILE_CONT(score, 0.25) OVER (PARTITION BY post_hour, post_weekday) as perc_25,
+  PERCENTILE_CONT(score, 0.50) OVER (PARTITION BY post_hour, post_weekday) as perc_50,
+  PERCENTILE_CONT(score, 0.75) OVER (PARTITION BY post_hour, post_weekday) as perc_75
+  FROM (
+    SELECT 
+    EXTRACT(HOUR FROM timestamp AT TIME ZONE "America/New_York") as post_hour,
+    EXTRACT(DAYOFWEEK FROM timestamp AT TIME ZONE "America/New_York") as post_weekday,
+    score
+    FROM `bigquery-public-data.hacker_news.full`
+    WHERE DATETIME(timestamp, "America/New_York") BETWEEN "2017-01-01 00:00:00" AND "2018-08-01 00:00:00"
+)
+)
+GROUP BY post_hour, post_weekday, perc_25, perc_50, perc_75
+ORDER BY post_hour, post_weekday
+```
+
 ```{r}
-df_hn_hour_doy <- read_csv('results-20180819-164659.csv') %>%
+query <- '
+#standardSQL
+SELECT
+post_hour,
+post_weekday,
+COUNT(*) as num_instances,
+ROUND(AVG(score)) as avg_score,
+perc_25, perc_50, perc_75
+FROM (
+  SELECT *,
+  PERCENTILE_CONT(score, 0.25) OVER (PARTITION BY post_hour, post_weekday) as perc_25,
+  PERCENTILE_CONT(score, 0.50) OVER (PARTITION BY post_hour, post_weekday) as perc_50,
+  PERCENTILE_CONT(score, 0.75) OVER (PARTITION BY post_hour, post_weekday) as perc_75
+  FROM (
+    SELECT 
+    EXTRACT(HOUR FROM timestamp AT TIME ZONE "America/New_York") as post_hour,
+    EXTRACT(DAYOFWEEK FROM timestamp AT TIME ZONE "America/New_York") as post_weekday,
+    score
+    FROM `bigquery-public-data.hacker_news.full`
+    WHERE DATETIME(timestamp, "America/New_York") BETWEEN "2017-01-01 00:00:00" AND "2018-08-01 00:00:00"
+)
+)
+GROUP BY post_hour, post_weekday, perc_25, perc_50, perc_75
+ORDER BY post_hour, post_weekday
+'
+
+df_hn_hour_doy <- bq_project_query(project_id, query, use_legacy_sql=F) %>%
+                        bq_table_download() %>%
                         mutate(post_hour = factor(post_hour, labels=hour_labels),
                                post_weekday = factor(post_weekday, labels=doy_labels),
                                prop = num_instances / sum(num_instances))
@@ -220,11 +357,11 @@ plot <- ggplot(df_hn_hour_doy, aes(x=post_hour, y=fct_rev(post_weekday), fill=pe
   scale_x_discrete() +
   scale_y_discrete() +
   scale_fill_viridis_c(option="plasma") +
-  labs(title='Median Score of Reddit Submissions For 50 Top Subreddits, by Time Posted',
-       subtitle='For Posts Made January 2017 to May 2018. Vertical lines indicate 9 AM - 5 PM Eastern. Top Subreddits determined by # of unique submitters.',
-       x='Hour Reddit Post Was Made (12 AM — 11 PM Eastern Time)',
-       y='Day of Week Reddit Post Was Made',
-       fill='Median Score for Posts\nMade at Time on Subreddit',
+  labs(title='Median Score of Hacker News submissions, by Time Posted',
+       subtitle='For Posts Made January 2017 to July 2018. Vertical lines indicate 9 AM - 5 PM Eastern.',
+       x='Hour Hacker News Post Was Made (12 AM — 11 PM Eastern Time)',
+       y='Day of Week Hacker News Post Was Made',
+       fill='Median Score for Posts\nMade at Time',
        caption = "Max Woolf — minimaxir.com") +
   theme(legend.position = 'top',
         legend.title = element_text(size = 6),
@@ -246,11 +383,11 @@ plot <- ggplot(df_reddit_hour_doy %>% filter(subreddit %in% top_subreddits), aes
   scale_x_discrete() +
   scale_y_discrete() +
   scale_fill_viridis_c(option="inferno", labels=percent_format(accuracy=0.1)) +
-  labs(title='Distribution of New Reddit Submissions For 50 Top Subreddits, by Time Posted',
-       subtitle='For Posts Made January 2017 to May 2018. Vertical lines indicate 9 AM - 5 PM Eastern. Top Subreddits determined by # of unique submitters.',
-       x='Hour Reddit Post Was Made (12 AM — 11 PM Eastern Time)',
-       y='Day of Week Reddit Post Was Made',
-       fill='Proportion of All Posts\nMade on Subreddit',
+  labs(title='Distribution of Hacker News Submissions, by Time Posted',
+       subtitle='For Posts Made January 2017 to August 2018. Vertical lines indicate 9 AM - 5 PM Eastern.',
+       x='Hour Hacker News Post Was Made (12 AM — 11 PM Eastern Time)',
+       y='Day of Week Hacker News Post Was Made',
+       fill='Proportion of All Posts',
        caption = "Max Woolf — minimaxir.com") +
   theme(legend.position = 'top',
         legend.title = element_text(size = 6),
@@ -266,7 +403,9 @@ ggsave('hn_prop.png', plot, width=5, height=3)
 
 # Bigrams
 
-Query:
+## Reddit
+
+BigQuery:
 
 ```sql
 #standardSQL
@@ -318,10 +457,59 @@ WHERE entry_num <= 50
 ORDER BY subreddit, entry_num
 ```
 
-## Reddit
-
 ```{r}
-reddit_bigrams <- read_csv('results-20180819-173006.csv')
+query <- '
+#standardSQL
+SELECT * FROM (
+SELECT *,
+ROW_NUMBER() OVER (PARTITION BY subreddit ORDER BY perc_75 DESC) entry_num
+FROM (
+SELECT word, nextword,
+subreddit,
+COUNT(*) as num_instances,
+ROUND(AVG(score)) as avg_score,
+perc_25, perc_50, perc_75
+
+FROM (
+SELECT *,
+PERCENTILE_CONT(score, 0.25) OVER (PARTITION BY subreddit, word, nextword) as perc_25,
+PERCENTILE_CONT(score, 0.50) OVER (PARTITION BY subreddit, word, nextword) as perc_50,
+PERCENTILE_CONT(score, 0.75) OVER (PARTITION BY subreddit, word, nextword) as perc_75
+FROM (
+  SELECT word,
+  LEAD(word) OVER(PARTITION BY id ORDER BY pos) nextword,
+  score,
+  subreddit
+  FROM (
+    SELECT SPLIT(LOWER(REGEXP_REPLACE(title, "[^a-zA-Z0-9 \\\'\\\"]", "")), " ") as words, id, score, subreddit
+    FROM `fh-bigquery.reddit_posts.*`
+    WHERE _TABLE_SUFFIX BETWEEN "2017_01" AND "2018_05"
+    AND subreddit IN (
+      SELECT subreddit
+      FROM `fh-bigquery.reddit_posts.*`
+      WHERE _TABLE_SUFFIX BETWEEN "2017_01" AND "2018_05"
+      GROUP BY subreddit
+      ORDER BY APPROX_COUNT_DISTINCT(author) DESC
+      LIMIT 100
+    )
+    ), UNNEST(words) word
+    WITH OFFSET as pos
+    )
+  WHERE nextword IS NOT NULL
+  AND nextword != ""
+  AND word IS NOT NULL
+  AND word != ""
+)
+GROUP BY word, nextword, subreddit, perc_25, perc_50, perc_75
+HAVING num_instances >= 100
+)
+)
+WHERE entry_num <= 50
+ORDER BY subreddit, entry_num
+'
+
+reddit_bigrams <- bq_project_query(project_id, query, use_legacy_sql=F) %>%
+                        bq_table_download() 
 
 reddit_bigrams %>% head()
 ```
@@ -329,26 +517,26 @@ reddit_bigrams %>% head()
 Filter out rows where both parts of the bigram are common/stop words.
 
 ```{r}
-stopwords <- get_stopwords() %>% pull(word)
+stopwords <- tidytext::get_stopwords() %>% pull(word)
 
-reddit_bigrams  <- reddit_bigrams %>%
+reddit_bigrams_filtered  <- reddit_bigrams %>%
                     filter(!((word %in% stopwords) & (nextword %in% stopwords))) %>%
                     mutate(bigram = paste(word, nextword))
 ```
 
-Visualize only the top 5 bigrams for each subreddit (for readability)
+Visualize only the top 10 bigrams for each subreddit (for readability)
 
 This adapts a [ggplot2 facet trick](https://drsimonj.svbtle.com/ordering-categories-within-ggplot2-facets) by Simon Jackson.
 
 ```{r}
-sub_exclude <- c("me_irl", "explainlikeimfive", "Fireteams", "NoStupidQuestions", "GlobalOffensive", "GlobalOffensiveTrade", "RocketLeagueExchange", "leagueoflegends", "CircleofTrust", "PUBATTLEGROUNDS")
+sub_exclude <- c("me_irl", "explainlikeimfive", "Fireteams", "NoStupidQuestions", "GlobalOffensive", "GlobalOffensiveTrade", "RocketLeagueExchange", "leagueoflegends", "CircleofTrust", "PUBATTLEGROUNDS", "dirtykikpals", "gonewild")
 
 top_subreddits <- df_top_subreddits %>%
                     filter(!(subreddit %in% sub_exclude)) %>%
                     head(24) %>%
                     pull(subreddit)
 
-reddit_bigrams_sub <- reddit_bigrams %>%
+reddit_bigrams_sub <- reddit_bigrams_filtered %>%
                         filter(subreddit %in% top_subreddits) %>%
                         group_by(subreddit) %>%
                         top_n(10, perc_75) %>%
@@ -381,12 +569,81 @@ ggsave('reddit_subreddit_topbigrams.png', plot, width=6, height=9)
 
 # Density Distribution / Ridgeplot
 
+BigQuery:
+
+```sql
+#standardSQL
+SELECT
+  subreddit,
+  score,
+  COUNT(*) AS num_submissions
+FROM
+  `fh-bigquery.reddit_posts.*`
+WHERE
+  _TABLE_SUFFIX BETWEEN "2017_01"
+  AND "2018_05"
+  AND subreddit IN (
+  SELECT
+    subreddit
+  FROM
+    `fh-bigquery.reddit_posts.*`
+  WHERE
+    _TABLE_SUFFIX BETWEEN "2017_01"
+    AND "2018_05"
+  GROUP BY
+    subreddit
+  ORDER BY
+    APPROX_COUNT_DISTINCT(author) DESC
+  LIMIT
+    100 )
+  AND score <= 100
+GROUP BY
+  subreddit,
+  score
+ORDER BY
+  subreddit,
+  score
+```
+
 ```{r}
-reddit_dist <- read_csv('results-20180908-193851.csv') %>%
-                group_by(subreddit) %>%
-                mutate(prop = num_submissions / sum(num_submissions)) %>%
-                ungroup() %>%
-                filter(score <= 20)
+query <- '
+#standardSQL
+SELECT
+  subreddit,
+  score,
+  COUNT(*) AS num_submissions
+FROM
+  `fh-bigquery.reddit_posts.*`
+WHERE
+  _TABLE_SUFFIX BETWEEN "2017_01"
+  AND "2018_05"
+  AND subreddit IN (
+  SELECT
+    subreddit
+  FROM
+    `fh-bigquery.reddit_posts.*`
+  WHERE
+    _TABLE_SUFFIX BETWEEN "2017_01"
+    AND "2018_05"
+  GROUP BY
+    subreddit
+  ORDER BY
+    APPROX_COUNT_DISTINCT(author) DESC
+  LIMIT
+    100 )
+  AND score <= 100
+GROUP BY
+  subreddit,
+  score
+ORDER BY
+  subreddit,
+  score
+'
+
+reddit_dist <- bq_project_query(project_id, query, use_legacy_sql=F) %>%
+                bq_table_download() %>%
+                left_join(df_top_subreddits) %>%
+                mutate(prop = num_submissions / total_posts)
 
 reddit_dist %>% head()
 ```
@@ -404,7 +661,7 @@ plot <- ggplot(reddit_dist %>% filter(subreddit %in% top_subreddits), aes(x=scor
   geom_density_ridges(stat = 'identity', scale=1.5, size=0.25) +
   scale_x_continuous(breaks=c(0, 1, seq(10, 20, 10))) +
   scale_y_discrete() +
-  scale_fill_hue(l = 55, guide=F) +
+  scale_fill_hue(l = 50, guide=F) +
   labs(title='Density Distribution of Score of Reddit Submissions\nFor 50 Top Subreddits',
        subtitle='For Posts Made January 2017 to May 2018.\nTop Subreddits determined by # of unique submitters.',
        x='Score of Reddit Post',
@@ -423,20 +680,20 @@ Another approach: faceted bar chart
 
 ```{r}
 # sub_exclude <- c("The_Donald", "PrequelMemes", "aww", "cats", "CrappyDesign", "politics")
-sub_exclude <- c()
+sub_exclude <- c("business", "dirtykikpals", "gonewild", "CircleofTrust")
 
 top_subreddits <- df_top_subreddits %>%
                     filter(!(subreddit %in% sub_exclude)) %>%
-                    head(54) %>%
+                    head(50) %>%
                     pull(subreddit)
 
 plot <- ggplot(reddit_dist %>% filter(subreddit %in% top_subreddits), aes(x=score, y=prop, fill=subreddit)) +
   geom_bar(stat = 'identity') +
   scale_x_continuous(breaks=c(0, 1, 5, 10), limits=c(NA, 11)) +
   scale_y_continuous(labels=percent_format(accuracy=1), breaks=pretty_breaks(4)) +
-  scale_fill_hue(l = 55, guide=F) +
-  facet_wrap(~ subreddit, ncol=6, scales="free")  +
-  labs(title='Score Distribution of Reddit Submissions For 54 Top Subreddits',
+  scale_fill_hue(l = 50, guide=F) +
+  facet_wrap(~ subreddit, ncol=5, scales="free")  +
+  labs(title='Score Distribution of Reddit Submissions For 50 Top Subreddits',
        subtitle='For Posts Made January 2017 to May 2018. Top Subreddits determined by # of unique submitters.',
        x='Score of Reddit Post',
        y='% of All Submissions on Subreddit',
