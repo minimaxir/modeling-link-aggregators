@@ -11,12 +11,9 @@ output:
     toc: True
 ---
 
-This R Notebook is the complement to my blog post [Analyzing IMDb Data The Intended Way, with R and ggplot2](http://minimaxir.com/2018/07/imdb-data-analysis/).
+This R Notebook is the complement to my blog post [Problems with Predicting Post Performance on Reddit and Other Link Aggregators](http://minimaxir.com/2018/09/modeling-link-aggregators/).
 
 This notebook is licensed under the MIT License. If you use the code or data visualization designs contained within this notebook, it would be greatly appreciated if proper attribution is given back to this notebook and/or myself. Thanks! :)
-
-IMDb data retrieved on July 4th 2018.
-
 
 ```{r}
 library(tidyverse)
@@ -175,7 +172,7 @@ df_top_subreddits %>% head(50)
 
 ```{r}
 # exclude subreddits which have high medians
-sub_exclude <- c("The_Donald", "PrequelMemes", "aww", "cats", "CrappyDesign", "politics", "CircleofTrust", "gonewild")
+sub_exclude <- c("The_Donald", "PrequelMemes", "aww", "cats", "CrappyDesign", "politics", "CircleofTrust", "gonewild", "news", "technology")
 
 top_subreddits <- df_top_subreddits %>%
                     filter(!(subreddit %in% sub_exclude)) %>%
@@ -208,9 +205,11 @@ plot <- ggplot(df_reddit_hour_doy %>% filter(subreddit %in% top_subreddits), aes
 ggsave('reddit_subreddit_hr_doy.png', plot, width=6, height=8)
 ```
 
+![](reddit_subreddit_hr_doy.png)
+
 ```{r}
 # exclude subreddits which have unexplained spikes
-sub_exclude <- c("CircleofTrust", "Music", "business")
+sub_exclude <- c("CircleofTrust", "Music", "business", "news", "technology")
 
 top_subreddits <- df_top_subreddits %>%
                     filter(!(subreddit %in% sub_exclude)) %>%
@@ -243,6 +242,8 @@ plot <- ggplot(df_reddit_hour_doy %>% filter(subreddit %in% top_subreddits), aes
 ggsave('reddit_subreddit_prop.png', plot, width=6, height=8)
 ```
 
+![](reddit_subreddit_prop.png)
+
 Drill down on subreddits with high medians.
 
 ```{r}
@@ -261,8 +262,8 @@ plot <- ggplot(df_reddit_hour_doy %>% filter(subreddit %in% top_subreddits), aes
   scale_y_discrete() +
   scale_fill_viridis_c(option="plasma") +
   facet_wrap(~ subreddit, nrow=3, ncol=2)  +
-  labs(title='Median Score of Reddit Submissions For 50 Top Subreddits, by Time Posted',
-       subtitle='For Posts Made January 2017 to May 2018. Vertical lines indicate 9 AM - 5 PM Eastern. Top Subreddits determined by # of unique submitters.',
+  labs(title='Median Score of Reddit Submissions For High Median Subreddits, by Time Posted',
+       subtitle='For Posts Made January 2017 to May 2018. Vertical lines indicate 9 AM - 5 PM Eastern.',
        x='Hour Reddit Post Was Made (12 AM — 11 PM Eastern Time)',
        y='Day of Week Reddit Post Was Made',
        fill='Median Score for Posts\nMade at Time on Subreddit',
@@ -278,6 +279,8 @@ plot <- ggplot(df_reddit_hour_doy %>% filter(subreddit %in% top_subreddits), aes
 
 ggsave('reddit_subreddit_highmedian.png', plot, width=6, height=4)
 ```
+
+![](reddit_subreddit_highmedian.png)
 
 ## Hacker News
 
@@ -375,6 +378,8 @@ plot <- ggplot(df_hn_hour_doy, aes(x=post_hour, y=fct_rev(post_weekday), fill=pe
 ggsave('hn_hr_doy.png', plot, width=5, height=3)
 ```
 
+![](hn_hr_doy.png)
+
 ```{r}
 plot <- ggplot(df_reddit_hour_doy %>% filter(subreddit %in% top_subreddits), aes(x=post_hour, y=fct_rev(post_weekday), fill=prop)) +
   geom_raster(stat="identity", interpolate=F) +
@@ -400,6 +405,8 @@ plot <- ggplot(df_reddit_hour_doy %>% filter(subreddit %in% top_subreddits), aes
 
 ggsave('hn_prop.png', plot, width=5, height=3)
 ```
+
+![](hn_prop.png)
 
 # Bigrams
 
@@ -562,10 +569,13 @@ plot <- ggplot(reddit_bigrams_sub, aes(x=order, y=perc_75, fill=subreddit)) +
        caption = "Max Woolf — minimaxir.com") +
   theme(axis.text.x = element_text(size = 6),
         axis.text.y = element_text(size = 6),
-        axis.title.y = element_blank())
+        axis.title.y = element_blank(),
+        panel.grid.minor = element_blank())
 
 ggsave('reddit_subreddit_topbigrams.png', plot, width=6, height=9)
 ```
+
+![](reddit_subreddit_topbigrams.png)
 
 # Density Distribution / Ridgeplot
 
@@ -676,11 +686,12 @@ plot <- ggplot(reddit_dist %>% filter(subreddit %in% top_subreddits), aes(x=scor
 ggsave('reddit_dist.png', plot, width=4, height=6)
 ```
 
-Another approach: faceted bar chart
+![](reddit_dist.png)
+
+Another approach: faceted bar chart (may work better since the violin plot is hard to read)
 
 ```{r}
-# sub_exclude <- c("The_Donald", "PrequelMemes", "aww", "cats", "CrappyDesign", "politics")
-sub_exclude <- c("business", "dirtykikpals", "gonewild", "CircleofTrust")
+sub_exclude <- c("business", "dirtykikpals", "gonewild", "CircleofTrust", "news", "technology")
 
 top_subreddits <- df_top_subreddits %>%
                     filter(!(subreddit %in% sub_exclude)) %>%
@@ -707,6 +718,7 @@ plot <- ggplot(reddit_dist %>% filter(subreddit %in% top_subreddits), aes(x=scor
 ggsave('reddit_dist_facet.png', plot, width=6, height=8)
 ```
 
+![](reddit_dist_facet.png)
 
 # LICENSE
 
